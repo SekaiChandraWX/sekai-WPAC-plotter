@@ -16,7 +16,7 @@ import io
 
 # Page configuration
 st.set_page_config(
-    page_title="WPAC 1st Generation (GMS 1-4) Satellite Data Archive",
+    page_title="GMS 1-4 WPAC Analysis",
     layout="wide"
 )
 
@@ -178,7 +178,7 @@ def process_and_plot(file_path, satellite, temp_dir, year, month, day, hour):
         rbtop3 = LinearSegmentedColormap.from_list("rbtop3", colors)
 
         # Plot the data using the custom inverted colormap with Cartopy
-        fig, ax = plt.subplots(subplot_kw={'projection': ccrs.PlateCarree()}, figsize=(12, 18))
+        fig, ax = plt.subplots(subplot_kw={'projection': ccrs.PlateCarree()})
         vmin = V_MIN_SETTINGS[satellite]
         im = ax.imshow(data_square, vmin=vmin, vmax=40, cmap=rbtop3,
                        extent=[100, 180, -60, 60], transform=ccrs.PlateCarree())
@@ -191,22 +191,38 @@ def process_and_plot(file_path, satellite, temp_dir, year, month, day, hour):
         ax.set_xticks([])
         ax.set_yticks([])
 
-        # Add colorbar
-        plt.colorbar(im, ax=ax, orientation='vertical', label='Temperature (°C)')
-
-        # Add title and watermark
-        dt = datetime(year, month, day, hour)
-        title = f'{satellite} Data for {dt.strftime("%B %d, %Y at %H:00 UTC")}'
-        plt.title(title, fontsize=18, weight='bold', pad=10)
-        
-        plt.figtext(0.5, 0.02, 'Plotted by Sekai Chandra (@Sekai_WX)', 
-                   ha='center', fontsize=12, weight='bold')
-
-        # Save to bytes buffer
-        img_buffer = io.BytesIO()
-        plt.savefig(img_buffer, format='jpg', dpi=300, bbox_inches='tight', pad_inches=0.1)
-        img_buffer.seek(0)
+        # Save the plot as a high-quality JPG image first
+        temp_plot_path = os.path.join(temp_dir, 'satellite_data_plot.jpg')
+        plt.savefig(temp_plot_path, format='jpg', dpi=2000, bbox_inches='tight', pad_inches=0)
         plt.close()
+
+        # Open the saved image and stretch it sideways by 75%
+        from PIL import Image, ImageDraw, ImageFont
+        img = Image.open(temp_plot_path)
+        width, height = img.size
+        new_width = int(width * 1.75)
+        img = img.resize((new_width, height), Image.LANCZOS)
+
+        # Add watermarks
+        draw = ImageDraw.Draw(img)
+        try:
+            # Try to use a system font, fallback to default if not available
+            font = ImageFont.truetype("arial.ttf", 200)
+        except:
+            try:
+                font = ImageFont.truetype("Arial.ttf", 200) 
+            except:
+                font = ImageFont.load_default()
+        
+        watermark_text_top = f"GMS Data for {year}-{month:02d}-{day:02d} at {hour:02d}:00 UTC"
+        watermark_text_bottom = "Plotted by Sekai Chandra @Sekai_WX"
+        draw.text((10, 10), watermark_text_top, fill="white", font=font)
+        draw.text((10, height - 250), watermark_text_bottom, fill="red", font=font)
+
+        # Convert to bytes buffer
+        img_buffer = io.BytesIO()
+        img.save(img_buffer, format='JPEG', quality=95)
+        img_buffer.seek(0)
 
         return img_buffer.getvalue()
 
