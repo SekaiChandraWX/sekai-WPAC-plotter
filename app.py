@@ -353,7 +353,7 @@ def create_plot(data, satellite, year, month, day, hour, minute=None, vmin_overr
     vmin = vmin_override if vmin_override is not None else -100
     vmax = vmax_override if vmax_override is not None else 40
 
-    fig, ax = plt.subplots(figsize=(12, 8), dpi=150)
+    fig, ax = plt.subplots(figsize=(12, 8), dpi=500)
     img = ax.imshow(data, cmap=custom_cmap, vmin=vmin, vmax=vmax)
 
     ax.grid(False)
@@ -382,8 +382,8 @@ def create_plot(data, satellite, year, month, day, hour, minute=None, vmin_overr
     return img_buffer.getvalue()
 
 # Main UI
-st.title("WPAC Basin Typhoon Analysis")
-st.write("Comprehensive satellite data analysis from 1981 to present")
+st.title("WPAC Satellite Data Archive")
+st.write("Comprehensive WPAC basin satellite data from 1981 to present")
 
 # Check for conversion file
 if not os.path.exists('gms_conversions.csv'):
