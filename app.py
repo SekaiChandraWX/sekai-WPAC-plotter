@@ -16,7 +16,7 @@ import io
 
 # Page configuration
 st.set_page_config(
-    page_title="GMS 1-4 WPAC Analysis",
+    page_title="WPAC 1st Generation (GMS 1-4) Satellite Data Archive",
     layout="wide"
 )
 
@@ -178,7 +178,7 @@ def process_and_plot(file_path, satellite, temp_dir, year, month, day, hour):
         rbtop3 = LinearSegmentedColormap.from_list("rbtop3", colors)
 
         # Plot the data using the custom inverted colormap with Cartopy
-        fig, ax = plt.subplots(subplot_kw={'projection': ccrs.PlateCarree()}, figsize=(14, 10))
+        fig, ax = plt.subplots(subplot_kw={'projection': ccrs.PlateCarree()}, figsize=(12, 18))
         vmin = V_MIN_SETTINGS[satellite]
         im = ax.imshow(data_square, vmin=vmin, vmax=40, cmap=rbtop3,
                        extent=[100, 180, -60, 60], transform=ccrs.PlateCarree())
