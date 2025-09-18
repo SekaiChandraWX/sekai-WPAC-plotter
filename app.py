@@ -354,7 +354,7 @@ def create_plot(data, satellite, year, month, day, hour, minute=None, vmin_overr
     
     title = f'{satellite} Satellite IR Data - {time_str}'
     plt.title(title, fontsize=16, weight='bold', pad=10)
-    plt.figtext(0.5, 0.02, 'Plotted by Sekai Chandra (@Sekai_WX)', 
+    plt.figtext(0.5, -0.02, 'Plotted by Sekai Chandra (@Sekai_WX)', 
                ha='center', fontsize=10, weight='bold')
 
     # Save to bytes
@@ -366,8 +366,8 @@ def create_plot(data, satellite, year, month, day, hour, minute=None, vmin_overr
     return img_buffer.getvalue()
 
 # Main UI
-st.title("WPAC Basin Typhoon Analysis")
-st.write("Comprehensive satellite data analysis from 1981 to present")
+st.title("WPAC Basin Satellite Data Archive")
+st.write("Continuous satellite data of the WPAC basin from 1981 to present")
 
 # Check for conversion file
 if not os.path.exists('gms_conversions.csv'):
