@@ -203,7 +203,7 @@ def process_and_plot(file, year, month, day, hour, satellite, temp_dir):
 
     # Save the plot as a high-quality image
     plot_path = os.path.join(temp_dir, 'satellite_data_plot.jpg')
-    plt.savefig(plot_path, format='jpg', dpi=750, bbox_inches='tight', pad_inches=0)
+    plt.savefig(plot_path, format='jpg', dpi=700, bbox_inches='tight', pad_inches=0)
     plt.close()
 
     # Open the saved image and stretch it sideways by 75%
