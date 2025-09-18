@@ -1,137 +1,135 @@
-# 🛰️ WPAC Satellite Data Plotter (1981-1995)
+# 🛰️ GMS Satellite Data Viewer
 
-A Streamlit web application for generating satellite imagery from historical GMS (Geostationary Meteorological Satellite) data covering the Western Pacific region from 1981-1995.
+A Streamlit web application for viewing historical Geostationary Meteorological Satellite (GMS) infrared imagery from 1981-1995.
 
 ## 🌟 Features
 
-- **Interactive Web Interface**: Easy-to-use date and time picker
-- **Historical Coverage**: Access to GMS 1-4 satellite data (1981-1995)
-- **Automatic Satellite Selection**: App automatically determines which satellite to use based on date
-- **Time Validation**: Ensures selected times are valid for each satellite
-- **High-Quality Output**: Generates publication-ready satellite imagery
-- **Real-time Processing**: Downloads and processes data on-demand
-- **Custom Colormap**: Uses specialized meteorological color scheme
+- **Historical Coverage**: Access GMS1-GMS4 satellite data spanning March 1981 to June 1995
+- **Interactive Interface**: Simple date and time selection with automatic satellite detection
+- **High-Quality Visualization**: Custom colormap for infrared temperature data
+- **Download Capability**: Save generated images as high-resolution JPEGs
+- **Caching**: Built-in caching to reduce server load and improve performance
 
-## 🛰️ Satellite Coverage
+## 📊 Satellite Coverage
 
-| Satellite | Coverage Period | Time Resolution |
-|-----------|----------------|-----------------|
-| **GMS1** | Mar 1981 - Dec 1981<br>Jan 1984 - Jun 1984 | Every 3 hours |
-| **GMS2** | Dec 1981 - Jan 1984 | Every 3 hours |
-| **GMS3** | Sep 1984 - Dec 1989 | Every 3 hours |
-| **GMS4** | Dec 1989 - Jun 1995 | Every hour |
+| Satellite | Coverage Period | Data Frequency |
+|-----------|----------------|----------------|
+| **GMS1** | March 1, 1981 - June 29, 1984 | Every 3 hours |
+| **GMS2** | December 21, 1981 - January 21, 1984 | Every 3 hours |
+| **GMS3** | September 27, 1984 - December 4, 1989 | Every 3 hours |
+| **GMS4** | December 4, 1989 - June 13, 1995 | Every hour |
 
-**Valid Times for GMS1-3**: 00, 03, 06, 09, 12, 15, 18, 21 UTC  
-**Valid Times for GMS4**: Every hour (00-23 UTC)
+*Note: Tri-hourly data is available at 00, 03, 06, 09, 12, 15, 18, 21 UTC. GMS4 provides hourly data (00-23 UTC).*
 
-## 🚀 Quick Start
+## 🚀 Deployment
 
-### Prerequisites
-- Python 3.8 or higher
-- Git
+### Deploy on Streamlit Cloud
 
-### Installation
+1. **Fork this repository** to your GitHub account
 
-1. **Clone the repository**
-   ```bash
-   git clone <your-repository-url>
-   cd wpac-satellite-plotter
-   ```
+2. **Add the required CSV file**: You need to add a `gms_conversions.csv` file to the repository root. This file should contain brightness-to-temperature conversion data with columns:
+   - `BRIT`: Brightness values
+   - `TEMP`: Temperature values
 
-2. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
+3. **Deploy on Streamlit Cloud**:
+   - Go to [share.streamlit.io](https://share.streamlit.io)
+   - Click "New app"
+   - Select your forked repository
+   - Set the main file path to `app.py`
+   - Click "Deploy"
 
-3. **Ensure you have the conversion file**
-   Make sure `gms_conversions.csv` is in the root directory of the project. This file contains the brightness temperature conversion mappings.
+### Local Development
 
-4. **Run the application**
-   ```bash
-   streamlit run app.py
-   ```
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/gms-satellite-viewer.git
+cd gms-satellite-viewer
 
-5. **Open your browser**
-   The app will automatically open in your browser at `http://localhost:8501`
+# Install dependencies
+pip install -r requirements.txt
 
-## 📊 How to Use
+# Add your gms_conversions.csv file to the repository root
 
-1. **Select a Date**: Choose any date within the satellite coverage periods using the date picker
-2. **Select a Time**: Choose a valid time (the app will warn you if the time is invalid for the selected satellite)
-3. **Generate Plot**: Click the "Generate Satellite Plot" button
-4. **View Results**: The high-resolution satellite image will appear in the main panel
-5. **Download**: Use the download button to save the image locally
+# Run the application
+streamlit run app.py
+```
 
-## 🔧 Technical Details
+## 📋 Required Files
+
+Make sure your repository contains these files:
+
+- `app.py` - Main Streamlit application
+- `requirements.txt` - Python dependencies
+- `gms_conversions.csv` - Brightness-to-temperature conversion data (you need to provide this)
+- `README.md` - This documentation
+
+## 💡 Usage
+
+1. **Select Date**: Choose any date within the satellite coverage period (1981-1995)
+2. **Select Hour**: Pick an available hour (tri-hourly for GMS1-3, hourly for GMS4)
+3. **Generate Image**: Click the "Generate Satellite Image" button
+4. **Download**: Save the generated high-resolution image
+
+## ⚡ Performance Notes
+
+- **Caching**: Data is cached for 1 hour to reduce FTP server load
+- **Processing Time**: Initial requests may take 30-60 seconds due to FTP downloads
+- **Rate Limiting**: Built-in delays help manage server resources
+- **File Sizes**: Generated images are high-resolution and may be several MB
+
+## 🛠️ Technical Details
 
 ### Data Source
-- **FTP Server**: `gms.cr.chiba-u.ac.jp`
-- **Data Format**: VISSR (Visible and Infrared Spin Scan Radiometer) infrared data
-- **File Format**: Gzipped binary data in TAR archives
-- **Spatial Coverage**: Western Pacific (100°E-180°E, 60°S-60°N)
+- **FTP Server**: gms.cr.chiba-u.ac.jp
+- **Format**: Compressed tar files containing gzipped VISSR data
+- **Processing**: Data is decompressed, reshaped, and converted to temperature values
 
-### Image Processing Pipeline
-1. **Download**: Fetches compressed satellite data from FTP server
-2. **Extract**: Uncompresses TAR and GZIP archives
-3. **Convert**: Applies brightness temperature conversion using CSV lookup
-4. **Reshape**: Processes raw binary data into 2D arrays
-5. **Enhance**: Applies custom meteorological colormap
-6. **Post-process**: Stretches image horizontally by 75% and adds watermarks
-7. **Export**: Saves as high-resolution JPEG
+### Visualization
+- **Colormap**: Custom "rbtop3" colormap optimized for infrared imagery
+- **Projection**: Plate Carrée projection covering 100°E-180°E, 60°S-60°N
+- **Resolution**: Images are generated at 300 DPI for high quality
 
-### Key Features of Generated Images
-- **Resolution**: 2000 DPI for publication quality
-- **Projection**: Plate Carrée (Geographic)
-- **Color Scheme**: Custom "rbtop3" meteorological colormap
-- **Watermarks**: Date/time stamp and attribution
-- **Format**: JPEG with horizontal stretching for optimal viewing
+### Libraries Used
+- **Streamlit**: Web application framework
+- **Matplotlib + Cartopy**: Geospatial visualization
+- **NumPy + SciPy**: Data processing
+- **Pillow**: Image manipulation
+- **Pandas**: CSV data handling
 
-## 📁 File Structure
-```
-wpac-satellite-plotter/
-├── app.py                 # Main Streamlit application
-├── requirements.txt       # Python dependencies
-├── gms_conversions.csv   # Temperature conversion lookup table
-└── README.md             # This file
-```
-
-## ⚠️ Important Notes
-
-- **Internet Connection Required**: The app downloads data in real-time from the FTP server
-- **Processing Time**: Initial downloads may take 1-3 minutes depending on connection speed
-- **File Size**: Generated images are high-resolution and may be several MB in size
-- **Temporary Files**: The app creates temporary files during processing that are automatically cleaned up
-
-## 🐛 Troubleshooting
+## 🔧 Troubleshooting
 
 ### Common Issues
 
-**"Date is out of coverage period"**
-- Check that your selected date falls within the satellite coverage periods listed above
+**"GMS conversion CSV file not found"**
+- Ensure `gms_conversions.csv` is in your repository root
+- Check that the file has the correct column names (`BRIT`, `TEMP`)
 
-**"Invalid time for satellite"**
-- GMS1-3: Only available every 3 hours (00, 03, 06, 09, 12, 15, 18, 21 UTC)
-- GMS4: Available every hour
-
-**"Failed to download file"**
-- Check your internet connection
+**"Failed to download the file"**
 - The FTP server may be temporarily unavailable
+- Check your internet connection
 - Try a different date/time
 
-**Font errors in generated images**
-- The app will fallback to default fonts if system fonts are not available
-- On Linux systems, you may need to install additional font packages
+**"Date is out of coverage period"**
+- Verify the date is within 1981-1995
+- Check the satellite coverage table above
+
+### Font Issues
+The application will fall back to default fonts if Arial is not available on the deployment server.
+
+## 📝 License
+
+This project is for educational and research purposes. Please respect the data source and cite appropriately when using generated images.
+
+## 👨‍💻 Credits
+
+- **Original Script**: Sekai Chandra (@Sekai_WX)
+- **Data Source**: Chiba University GMS Archive
+- **Streamlit Conversion**: [Your name here]
 
 ## 🤝 Contributing
 
-Feel free to submit issues and enhancement requests!
+Contributions are welcome! Please feel free to submit issues, feature requests, or pull requests.
 
-## 📜 License
+---
 
-This project is for educational and research purposes. Please respect the data source and provide appropriate attribution when using the generated imagery.
-
-## 🙏 Acknowledgments
-
-- **Data Source**: Chiba University for maintaining the GMS historical archive
-- **Original Processing**: Based on Sekai Chandra's processing methodology
-- **Cartopy**: For geographic projections and mapping functionality
+*For questions or support, please open an issue on GitHub.*
