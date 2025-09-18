@@ -353,7 +353,7 @@ def create_plot(data, satellite, year, month, day, hour, minute=None, vmin_overr
     vmin = vmin_override if vmin_override is not None else -100
     vmax = vmax_override if vmax_override is not None else 40
 
-    fig, ax = plt.subplots(figsize=(12, 8), dpi=500)
+    fig, ax = plt.subplots(figsize=(12, 8), dpi=1000)
     img = ax.imshow(data, cmap=custom_cmap, vmin=vmin, vmax=vmax)
 
     ax.grid(False)
@@ -404,7 +404,7 @@ test_datetime = datetime.combine(selected_date, datetime.min.time())
 satellite = get_satellite_for_datetime(test_datetime)
 
 if satellite:
-    st.success(f"Satellite system: {satellite}")
+    st.success(f"Using data from: {satellite}")
     
     # Get available times
     available_times = get_available_times(selected_date, satellite)
