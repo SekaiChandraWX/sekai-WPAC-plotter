@@ -218,19 +218,30 @@ def process_and_plot(file, year, month, day, hour, satellite, temp_dir):
 
 def main():
     st.set_page_config(
-        page_title="GMS 1-4 Satellite Data Archive",
+        page_title="GMS Satellite Data Viewer",
         layout="centered"
     )
     
-    st.title("GMS 1-4 Satellite Data Archive")
+    st.title("GMS Satellite Data Viewer")
     
-    # Simple input form
-    year = st.number_input("Year", min_value=1981, max_value=1995, value=1990)
-    month = st.number_input("Month", min_value=1, max_value=12, value=1)
-    day = st.number_input("Day", min_value=1, max_value=31, value=1)
-    hour = st.number_input("Hour (UTC)", min_value=0, max_value=23, value=0)
+    # Input form in columns
+    col1, col2, col3, col4 = st.columns(4)
     
-    if st.button("Generate Image"):
+    with col1:
+        year = st.number_input("Year", min_value=1981, max_value=1995, value=1990)
+    with col2:
+        month = st.number_input("Month", min_value=1, max_value=12, value=1)
+    with col3:
+        day = st.number_input("Day", min_value=1, max_value=31, value=1)
+    with col4:
+        hour = st.number_input("Hour (UTC)", min_value=0, max_value=23, value=0)
+    
+    # Centered generate button
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        generate_clicked = st.button("Generate Image")
+    
+    if generate_clicked:
         with st.spinner("Processing satellite data..."):
             start_time = time.time()
             
