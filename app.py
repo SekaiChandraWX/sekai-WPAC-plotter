@@ -64,8 +64,8 @@ def format_satellite_name(satellite):
         "GOES9": "GOES-9",
         "MTSAT1": "MTSAT-1R",
         "MTSAT2": "MTSAT-2",
-        "HIMAWARI8": "Himawari 8",
-        "HIMAWARI9": "Himawari 9"
+        "HIMAWARI8": "Himawari-8",
+        "HIMAWARI9": "Himawari-9"
     }
     return name_mapping.get(satellite, satellite)
 
@@ -353,7 +353,7 @@ def create_plot(data, satellite, year, month, day, hour, minute=None, vmin_overr
     vmin = vmin_override if vmin_override is not None else -100
     vmax = vmax_override if vmax_override is not None else 40
 
-    fig, ax = plt.subplots(figsize=(12, 8), dpi=1000)
+    fig, ax = plt.subplots(figsize=(12, 8), dpi=150)
     img = ax.imshow(data, cmap=custom_cmap, vmin=vmin, vmax=vmax)
 
     ax.grid(False)
@@ -382,8 +382,8 @@ def create_plot(data, satellite, year, month, day, hour, minute=None, vmin_overr
     return img_buffer.getvalue()
 
 # Main UI
-st.title("WPAC Satellite Data Archive")
-st.write("Comprehensive WPAC basin satellite data from 1981 to present")
+st.title("WPAC Basin Typhoon Analysis")
+st.write("Comprehensive satellite data analysis from 1981 to present")
 
 # Check for conversion file
 if not os.path.exists('gms_conversions.csv'):
@@ -404,7 +404,7 @@ test_datetime = datetime.combine(selected_date, datetime.min.time())
 satellite = get_satellite_for_datetime(test_datetime)
 
 if satellite:
-    st.success(f"Using data from: {satellite}")
+    st.success(f"Satellite system: {satellite}")
     
     # Get available times
     available_times = get_available_times(selected_date, satellite)
