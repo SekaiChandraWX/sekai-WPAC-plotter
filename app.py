@@ -259,6 +259,9 @@ def main():
             # Fallback if no satellite found
             hour = st.selectbox("Hour (UTC)", [0, 3, 6, 9, 12, 15, 18, 21], index=0)
     
+    # Warning message
+    st.warning("WARNING: Image WILL take 30-60 seconds to generate!")
+    
     # Perfectly centered generate button with red styling
     col1, col2, col3 = st.columns([2, 1, 2])
     with col2:
