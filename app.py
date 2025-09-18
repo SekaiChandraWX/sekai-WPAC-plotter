@@ -50,6 +50,22 @@ def conv(dat, csv_file_path):
                 dat[x][y] = 0
     return dat
 
+def get_satellite_for_date(year, month, day):
+    """Determine which satellite covers the given date"""
+    request_time = datetime(year, month, day)
+    for sat, ranges in GMS_RANGES.items():
+        for time_range in zip(ranges[::2], ranges[1::2]):
+            if time_range[0] <= request_time <= time_range[1]:
+                return sat
+    return None
+
+def get_valid_hours_for_satellite(satellite):
+    """Get valid hours for a given satellite"""
+    if satellite == "GMS4":
+        return list(range(24))  # Hourly data (0-23)
+    else:
+        return list(VALID_HOURS)  # Tri-hourly data (0, 3, 6, 9, 12, 15, 18, 21)
+
 @st.cache_data(ttl=3600)  # Cache for 1 hour to reduce server load
 def fetch_file(year, month, day, hour):
     """Fetch and process satellite data file"""
@@ -66,7 +82,7 @@ def fetch_file(year, month, day, hour):
             break
 
     if not satellite:
-        return None, None, "The requested date is out of this dataset's period of coverage! Please check the coverage dates in the sidebar."
+        return None, None, "The requested date is out of this dataset's period of coverage!"
 
     # Check valid hours for the satellite
     if satellite != "GMS4" and hour not in VALID_HOURS:
@@ -187,7 +203,7 @@ def process_and_plot(file, year, month, day, hour, satellite, temp_dir):
 
     # Save the plot as a high-quality image
     plot_path = os.path.join(temp_dir, 'satellite_data_plot.jpg')
-    plt.savefig(plot_path, format='jpg', dpi=1000, bbox_inches='tight', pad_inches=0)
+    plt.savefig(plot_path, format='jpg', dpi=750, bbox_inches='tight', pad_inches=0)
     plt.close()
 
     # Open the saved image and stretch it sideways by 75%
@@ -234,11 +250,35 @@ def main():
     with col3:
         day = st.number_input("Day", min_value=1, max_value=31, value=1)
     with col4:
-        hour = st.number_input("Hour (UTC)", min_value=0, max_value=23, value=0)
+        # Determine satellite and valid hours based on selected date
+        current_satellite = get_satellite_for_date(year, month, day)
+        if current_satellite:
+            valid_hours = get_valid_hours_for_satellite(current_satellite)
+            hour = st.selectbox("Hour (UTC)", valid_hours, index=0)
+        else:
+            # Fallback if no satellite found
+            hour = st.selectbox("Hour (UTC)", [0, 3, 6, 9, 12, 15, 18, 21], index=0)
     
-    # Centered generate button
-    col1, col2, col3 = st.columns([1, 1, 1])
+    # Perfectly centered generate button with red styling
+    col1, col2, col3 = st.columns([2, 1, 2])
     with col2:
+        st.markdown(
+            """
+            <style>
+            .stButton > button {
+                background-color: #ff4b4b;
+                color: white;
+                border: none;
+                width: 100%;
+            }
+            .stButton > button:hover {
+                background-color: #ff6b6b;
+                border: none;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True
+        )
         generate_clicked = st.button("Generate Image")
     
     if generate_clicked:
