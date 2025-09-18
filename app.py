@@ -216,109 +216,48 @@ def process_and_plot(file, year, month, day, hour, satellite, temp_dir):
 
     return final_image_path
 
-def get_valid_hours(satellite):
-    """Get valid hours for a given satellite"""
-    if satellite == "GMS4":
-        return list(range(24))  # Hourly data
-    else:
-        return list(VALID_HOURS)  # Tri-hourly data
-
 def main():
     st.set_page_config(
         page_title="GMS Satellite Data Viewer",
-        page_icon="🛰️",
-        layout="wide"
+        layout="centered"
     )
     
-    st.title("🛰️ GMS Satellite Data Viewer")
-    st.markdown("View historical Geostationary Meteorological Satellite (GMS) infrared imagery")
+    st.title("GMS Satellite Data Viewer")
     
-    # Sidebar with satellite information
-    st.sidebar.header("Satellite Coverage")
-    st.sidebar.markdown("""
-    **GMS1**: March 1, 1981 - June 29, 1984 (tri-hourly)
-    **GMS2**: December 21, 1981 - January 21, 1984 (tri-hourly)  
-    **GMS3**: September 27, 1984 - December 4, 1989 (tri-hourly)
-    **GMS4**: December 4, 1989 - June 13, 1995 (hourly)
+    # Simple input form
+    year = st.number_input("Year", min_value=1981, max_value=1995, value=1990)
+    month = st.number_input("Month", min_value=1, max_value=12, value=1)
+    day = st.number_input("Day", min_value=1, max_value=31, value=1)
+    hour = st.number_input("Hour (UTC)", min_value=0, max_value=23, value=0)
     
-    *Tri-hourly data available every 3 hours (00, 03, 06, 09, 12, 15, 18, 21 UTC)*
-    *GMS4 provides hourly data (every hour 00-23 UTC)*
-    """)
-    
-    # Main interface
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("Select Date and Time")
-        
-        # Date input
-        selected_date = st.date_input(
-            "Date",
-            value=datetime(1990, 1, 1),
-            min_value=datetime(1981, 3, 1),
-            max_value=datetime(1995, 6, 13)
-        )
-        
-        # Determine which satellite covers this date
-        request_time = datetime.combine(selected_date, datetime.min.time())
-        current_satellite = None
-        for sat, ranges in GMS_RANGES.items():
-            for time_range in zip(ranges[::2], ranges[1::2]):
-                if time_range[0].date() <= selected_date <= time_range[1].date():
-                    current_satellite = sat
-                    break
-            if current_satellite:
-                break
-        
-        if current_satellite:
-            st.info(f"Selected date is covered by **{current_satellite}**")
-            valid_hours = get_valid_hours(current_satellite)
-            hour = st.selectbox("Hour (UTC)", valid_hours, index=0)
-        else:
-            st.error("Selected date is not covered by any GMS satellite!")
-            hour = 0
-    
-    with col2:
-        st.subheader("Generate Image")
-        
-        if st.button("🚀 Generate Satellite Image", type="primary"):
-            if current_satellite:
-                with st.spinner("Processing satellite data..."):
-                    start_time = time.time()
-                    
-                    final_image_path, satellite_used, error_message = fetch_file(
-                        selected_date.year, 
-                        selected_date.month, 
-                        selected_date.day, 
-                        hour
+    if st.button("Generate Image"):
+        with st.spinner("Processing satellite data..."):
+            start_time = time.time()
+            
+            final_image_path, satellite_used, error_message = fetch_file(
+                year, month, day, hour
+            )
+            
+            processing_time = time.time() - start_time
+            
+            if error_message:
+                st.error(f"Error: {error_message}")
+            elif final_image_path:
+                st.success(f"Image generated successfully in {processing_time:.1f} seconds using {satellite_used}!")
+                
+                # Display the image
+                st.image(final_image_path, caption=f"GMS Satellite Data - {year}-{month:02d}-{day:02d} {hour:02d}:00 UTC")
+                
+                # Provide download button
+                with open(final_image_path, "rb") as file:
+                    st.download_button(
+                        label="Download Image",
+                        data=file.read(),
+                        file_name=f"GMS_{year}{month:02d}{day:02d}_{hour:02d}00_UTC.jpg",
+                        mime="image/jpeg"
                     )
-                    
-                    processing_time = time.time() - start_time
-                    
-                    if error_message:
-                        st.error(f"Error: {error_message}")
-                    elif final_image_path:
-                        st.success(f"Image generated successfully in {processing_time:.1f} seconds using {satellite_used}!")
-                        
-                        # Display the image
-                        st.image(final_image_path, caption=f"GMS Satellite Data - {selected_date} {hour:02d}:00 UTC")
-                        
-                        # Provide download button
-                        with open(final_image_path, "rb") as file:
-                            st.download_button(
-                                label="📥 Download Image",
-                                data=file.read(),
-                                file_name=f"GMS_{selected_date}_{hour:02d}00_UTC.jpg",
-                                mime="image/jpeg"
-                            )
-                    else:
-                        st.error("Failed to generate image. Please try again.")
             else:
-                st.error("Please select a valid date within the satellite coverage period.")
-    
-    # Footer
-    st.markdown("---")
-    st.markdown("*Data source: Chiba University GMS Archive | App by Sekai Chandra*")
+                st.error("Failed to generate image. Please try again.")
 
 if __name__ == "__main__":
     main()
