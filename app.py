@@ -388,7 +388,7 @@ test_datetime = datetime.combine(selected_date, datetime.min.time())
 satellite = get_satellite_for_datetime(test_datetime)
 
 if satellite:
-    st.success(f"Satellite system: {satellite}")
+    st.success(f"Using data from: {satellite}")
     
     # Get available times
     available_times = get_available_times(selected_date, satellite)
@@ -413,13 +413,13 @@ if satellite:
                 year, month, day = selected_date.year, selected_date.month, selected_date.day
                 
                 # Route to appropriate processing function
-                if satellite in ["GMS1", "GMS2", "GMS3", "GMS4"]:
+                if satellite in ["GMS 1", "GMS 2", "GMS 3", "GMS 4"]:
                     image_bytes = process_gms_legacy(year, month, day, selected_hour, satellite)
-                elif satellite in ["GMS5", "GOES9"]:
+                elif satellite in ["GMS 5", "GOES-9"]:
                     image_bytes = process_gms5_goes9(year, month, day, selected_hour, satellite)
                 elif satellite in ["MTSAT1", "MTSAT2"]:
                     image_bytes = process_mtsat(year, month, day, selected_hour, satellite)
-                elif satellite in ["HIMAWARI8", "HIMAWARI9"]:
+                elif satellite in ["HIMAWARI 8", "HIMAWARI 9"]:
                     image_bytes = process_himawari(year, month, day, selected_hour, selected_minute, satellite)
                 else:
                     st.error("Unknown satellite system")
