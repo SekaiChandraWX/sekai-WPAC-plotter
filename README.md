@@ -1,88 +1,137 @@
-# WPAC Typhoon Analysis - Streamlit Application
+# 🛰️ WPAC Satellite Data Plotter (1981-1995)
 
-A comprehensive satellite data analysis tool for the Western Pacific basin, supporting multiple satellite systems from 1981 to present.
+A Streamlit web application for generating satellite imagery from historical GMS (Geostationary Meteorological Satellite) data covering the Western Pacific region from 1981-1995.
 
-## File Structure
+## 🌟 Features
 
-```
-your-app
-├── app.py                    # Main application file
-├── pages
-│   ├── 1_GMS_1-4.py         # GMS 1-4 satellite analysis
-│   ├── 2_GMS_5_GOES_9.py    # GMS 5 & GOES 9 analysis
-│   ├── 3_MTSAT.py           # MTSAT satellite analysis
-│   ├── 4_Himawari-8.py      # Himawari-8 analysis
-│   └── 5_Himawari-9.py      # Himawari-9 analysis
-├── requirements.txt          # Python dependencies
-└── README.md                # This file
-```
+- **Interactive Web Interface**: Easy-to-use date and time picker
+- **Historical Coverage**: Access to GMS 1-4 satellite data (1981-1995)
+- **Automatic Satellite Selection**: App automatically determines which satellite to use based on date
+- **Time Validation**: Ensures selected times are valid for each satellite
+- **High-Quality Output**: Generates publication-ready satellite imagery
+- **Real-time Processing**: Downloads and processes data on-demand
+- **Custom Colormap**: Uses specialized meteorological color scheme
 
-## Satellite Coverage
+## 🛰️ Satellite Coverage
 
-- GMS 1-4 1981-1995 (3-hourly, hourly for GMS4 after Dec 1989)
-- GMS 5 & GOES 9 1995-2005 (hourly)
-- MTSAT 2005-2015 (hourly)
-- Himawari-8 2015-2022 (hourly)
-- Himawari-9 2022-Present (10-minute intervals)
+| Satellite | Coverage Period | Time Resolution |
+|-----------|----------------|-----------------|
+| **GMS1** | Mar 1981 - Dec 1981<br>Jan 1984 - Jun 1984 | Every 3 hours |
+| **GMS2** | Dec 1981 - Jan 1984 | Every 3 hours |
+| **GMS3** | Sep 1984 - Dec 1989 | Every 3 hours |
+| **GMS4** | Dec 1989 - Jun 1995 | Every hour |
 
-## Deployment
+**Valid Times for GMS1-3**: 00, 03, 06, 09, 12, 15, 18, 21 UTC  
+**Valid Times for GMS4**: Every hour (00-23 UTC)
 
-### Local Development
+## 🚀 Quick Start
 
-1. Clonedownload all files
-2. Install dependencies
+### Prerequisites
+- Python 3.8 or higher
+- Git
+
+### Installation
+
+1. **Clone the repository**
+   ```bash
+   git clone <your-repository-url>
+   cd wpac-satellite-plotter
+   ```
+
+2. **Install dependencies**
    ```bash
    pip install -r requirements.txt
    ```
-3. Run the application
+
+3. **Ensure you have the conversion file**
+   Make sure `gms_conversions.csv` is in the root directory of the project. This file contains the brightness temperature conversion mappings.
+
+4. **Run the application**
    ```bash
    streamlit run app.py
    ```
 
-### Cloud Deployment (Streamlit Cloud)
+5. **Open your browser**
+   The app will automatically open in your browser at `http://localhost:8501`
 
-1. Upload all files to a GitHub repository
-2. Connect your GitHub repo to Streamlit Cloud
-3. Deploy with the main file set to `app.py`
+## 📊 How to Use
 
-## Important Notes & Limitations
+1. **Select a Date**: Choose any date within the satellite coverage periods using the date picker
+2. **Select a Time**: Choose a valid time (the app will warn you if the time is invalid for the selected satellite)
+3. **Generate Plot**: Click the "Generate Satellite Plot" button
+4. **View Results**: The high-resolution satellite image will appear in the main panel
+5. **Download**: Use the download button to save the image locally
 
-### Missing Dependencies for Full Functionality
+## 🔧 Technical Details
 
-1. GMS Conversion CSV The GMS 1-4 processor requires a `gms_conversions.csv` file for temperature calibration. This file is not included and needs to be provided.
+### Data Source
+- **FTP Server**: `gms.cr.chiba-u.ac.jp`
+- **Data Format**: VISSR (Visible and Infrared Spin Scan Radiometer) infrared data
+- **File Format**: Gzipped binary data in TAR archives
+- **Spatial Coverage**: Western Pacific (100°E-180°E, 60°S-60°N)
 
-2. Font Files Scripts reference `arialbd.ttf` which may not be available in cloud environments. The app will work but without custom fonts.
+### Image Processing Pipeline
+1. **Download**: Fetches compressed satellite data from FTP server
+2. **Extract**: Uncompresses TAR and GZIP archives
+3. **Convert**: Applies brightness temperature conversion using CSV lookup
+4. **Reshape**: Processes raw binary data into 2D arrays
+5. **Enhance**: Applies custom meteorological colormap
+6. **Post-process**: Stretches image horizontally by 75% and adds watermarks
+7. **Export**: Saves as high-resolution JPEG
 
-### Potential Cloud Deployment Issues
+### Key Features of Generated Images
+- **Resolution**: 2000 DPI for publication quality
+- **Projection**: Plate Carrée (Geographic)
+- **Color Scheme**: Custom "rbtop3" meteorological colormap
+- **Watermarks**: Date/time stamp and attribution
+- **Format**: JPEG with horizontal stretching for optimal viewing
 
-1. FTP Connections GMS 1-4, GMS 5GOES 9, and MTSAT pages use FTP to download data from `gms.cr.chiba-u.ac.jp`. Cloud environments may block FTP connections.
+## 📁 File Structure
+```
+wpac-satellite-plotter/
+├── app.py                 # Main Streamlit application
+├── requirements.txt       # Python dependencies
+├── gms_conversions.csv   # Temperature conversion lookup table
+└── README.md             # This file
+```
 
-2. Memory Usage Satellite data processing is memory-intensive. Large files may cause memory issues on free cloud tiers.
+## ⚠️ Important Notes
 
-3. Processing Time Data download and processing can take several minutes, which may timeout on some cloud platforms.
+- **Internet Connection Required**: The app downloads data in real-time from the FTP server
+- **Processing Time**: Initial downloads may take 1-3 minutes depending on connection speed
+- **File Size**: Generated images are high-resolution and may be several MB in size
+- **Temporary Files**: The app creates temporary files during processing that are automatically cleaned up
 
-4. File Permissions Some cloud environments have restricted file system access.
+## 🐛 Troubleshooting
 
-### Data Sources
+### Common Issues
 
-- GMSMTSAT Data from Chiba University FTP server
-- Himawari-8 NOAA AWS S3 bucket (noaa-himawari8)
-- Himawari-9 NOAA AWS S3 bucket (noaa-himawari9)
+**"Date is out of coverage period"**
+- Check that your selected date falls within the satellite coverage periods listed above
 
-## Usage
+**"Invalid time for satellite"**
+- GMS1-3: Only available every 3 hours (00, 03, 06, 09, 12, 15, 18, 21 UTC)
+- GMS4: Available every hour
 
-1. Select a satellite system from the sidebar navigation
-2. Choose your desired date and time within the coverage period
-3. Click Generate Plot to download and process the data
-4. View the generated full-disk satellite imagery
+**"Failed to download file"**
+- Check your internet connection
+- The FTP server may be temporarily unavailable
+- Try a different date/time
 
-## Troubleshooting
+**Font errors in generated images**
+- The app will fallback to default fonts if system fonts are not available
+- On Linux systems, you may need to install additional font packages
 
-- FTP Timeouts Try different times or check if the FTP server is accessible
-- AWS S3 Errors Verify the date is within the available range
-- Memory Errors Try using smaller time periods or restart the application
-- Font Warnings Ignore font-related warnings - they won't affect functionality
+## 🤝 Contributing
 
-## Dependencies
+Feel free to submit issues and enhancement requests!
 
-See `requirements.txt` for the complete list of Python packages required.
+## 📜 License
+
+This project is for educational and research purposes. Please respect the data source and provide appropriate attribution when using the generated imagery.
+
+## 🙏 Acknowledgments
+
+- **Data Source**: Chiba University for maintaining the GMS historical archive
+- **Original Processing**: Based on Sekai Chandra's processing methodology
+- **Cartopy**: For geographic projections and mapping functionality
