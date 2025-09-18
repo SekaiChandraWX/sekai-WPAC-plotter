@@ -218,11 +218,11 @@ def process_and_plot(file, year, month, day, hour, satellite, temp_dir):
 
 def main():
     st.set_page_config(
-        page_title="GMS Satellite Data Viewer",
+        page_title="GMS 1-4 Satellite Data Archive",
         layout="centered"
     )
     
-    st.title("GMS Satellite Data Viewer")
+    st.title("GMS 1-4 Satellite Data Archive")
     
     # Simple input form
     year = st.number_input("Year", min_value=1981, max_value=1995, value=1990)
