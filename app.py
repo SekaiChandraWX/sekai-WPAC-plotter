@@ -187,7 +187,7 @@ def process_and_plot(file, year, month, day, hour, satellite, temp_dir):
 
     # Save the plot as a high-quality image
     plot_path = os.path.join(temp_dir, 'satellite_data_plot.jpg')
-    plt.savefig(plot_path, format='jpg', dpi=300, bbox_inches='tight', pad_inches=0)
+    plt.savefig(plot_path, format='jpg', dpi=500, bbox_inches='tight', pad_inches=0)
     plt.close()
 
     # Open the saved image and stretch it sideways by 75%
@@ -218,7 +218,7 @@ def process_and_plot(file, year, month, day, hour, satellite, temp_dir):
 
 def main():
     st.set_page_config(
-        page_title="GMS Satellite Data Viewer",
+        page_title="GMS 1-4 Satellite Data Archive (1981-1995)",
         layout="centered"
     )
     
