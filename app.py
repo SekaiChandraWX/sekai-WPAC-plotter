@@ -1,317 +1,380 @@
 import os
-import gzip
-import tarfile
+import io
+import re
+import bz2
 import ftplib
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.colors import LinearSegmentedColormap
-import cartopy.crs as ccrs
-from scipy.ndimage import zoom
-from PIL import Image, ImageDraw, ImageFont
-from datetime import datetime
-import streamlit as st
+import tarfile
 import tempfile
-import time
+from datetime import datetime
+from functools import lru_cache
+from pathlib import Path
 
-# Constants
-FTP_HOST = "gms.cr.chiba-u.ac.jp"
-FTP_BASE_PATH = "/pub"
-VALID_HOURS = set(range(0, 24, 3))
-GMS_RANGES = {
-    "GMS1": (datetime(1981, 3, 1, 0), datetime(1981, 12, 21, 0), datetime(1984, 1, 21, 9), datetime(1984, 6, 29, 12)),
-    "GMS2": (datetime(1981, 12, 21, 3), datetime(1984, 1, 21, 6)),
-    "GMS3": (datetime(1984, 9, 27, 6), datetime(1989, 12, 4, 0)),
-    "GMS4": (datetime(1989, 12, 4, 3), datetime(1995, 6, 13, 0))
-}
-V_MIN_SETTINGS = {"GMS1": -95, "GMS2": -100, "GMS3": -95, "GMS4": -90}
+import numpy as np
+import xarray as xr
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+import streamlit as st
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
 
-def find_closest_factors(n, target1, target2):
-    factors = []
-    for i in range(1, int(np.sqrt(n)) + 1):
-        if n % i == 0:
-            factors.append((i, n // i))
-    closest_factors = min(factors, key=lambda x: abs(x[0] - target1) + abs(x[1] - target2))
-    return closest_factors
+# -------------------- Streamlit page --------------------
+st.set_page_config(page_title="Himawari-8/9 (CEReS) B13 Brightness Temp", layout="wide")
+st.title("Himawari-8/9 B13 (10.4 μm) Brightness Temperature")
 
-def conv(dat, csv_file_path):
-    """Convert data using CSV mapping"""
-    if not os.path.exists(csv_file_path):
-        st.error("GMS conversion CSV file not found. Please ensure 'gms_conversions.csv' is in the app directory.")
-        return dat
-    
-    conv_df = pd.read_csv(csv_file_path)
-    mapping = dict(zip(conv_df['BRIT'], conv_df['TEMP']))
-    for x in range(len(dat)):
-        for y in range(len(dat[x])):
-            try:
-                dat[x][y] = mapping[round(dat[x][y])]
-            except:
-                dat[x][y] = 0
-    return dat
+# -------------------- Constants --------------------
+FTP_HOST = "hmwr829gr.cr.chiba-u.ac.jp"
+BASE_DIR = "/gridded/FD/V20190123"
+FAMILY   = "TIR"       # CEReS family
+BAND     = "01"        # TIR01 ~ AHI Band 13
+MISSING_RAW = 65535
 
-def get_satellite_for_date(year, month, day):
-    """Determine which satellite covers the given date"""
-    request_time = datetime(year, month, day)
-    for sat, ranges in GMS_RANGES.items():
-        for time_range in zip(ranges[::2], ranges[1::2]):
-            if time_range[0] <= request_time <= time_range[1]:
-                return sat
-    return None
+# grid spec (fixed CEReS FD lat/lon grid)
+GRID = dict(nx=6000, ny=6000, ddeg=0.02, lon_w=85.0, lat_n=60.0)
 
-def get_valid_hours_for_satellite(satellite):
-    """Get valid hours for a given satellite"""
-    if satellite == "GMS4":
-        return list(range(24))  # Hourly data (0-23)
-    else:
-        return list(VALID_HOURS)  # Tri-hourly data (0, 3, 6, 9, 12, 15, 18, 21)
+# WPAC basin (same flavor you used earlier)
+WPAC = dict(w=94.9, e=183.5, s=-14.6, n=56.1)
 
-@st.cache_data(ttl=3600)  # Cache for 1 hour to reduce server load
-def fetch_file(year, month, day, hour):
-    """Fetch and process satellite data file"""
-    request_time = datetime(year, month, day, hour)
-
-    # Determine the satellite
-    satellite = None
-    for sat, ranges in GMS_RANGES.items():
-        for time_range in zip(ranges[::2], ranges[1::2]):
-            if time_range[0] <= request_time <= time_range[1]:
-                satellite = sat
-                break
-        if satellite:
-            break
-
-    if not satellite:
-        return None, None, "The requested date is out of this dataset's period of coverage!"
-
-    # Check valid hours for the satellite
-    if satellite != "GMS4" and hour not in VALID_HOURS:
-        return None, None, f"This dataset is only valid every three hours EXCEPT FOR GMS4, which begins on 12/04/1989 and is hourly!"
-
-    # Create temporary directory for downloads
-    temp_dir = tempfile.mkdtemp()
-    
-    # Construct the file path
-    ftp_dir = f"{FTP_BASE_PATH}/{satellite}/VISSR/{year}{month:02d}/{day:02d}"
-    file_name = f"VISSR_{satellite}_{year}{month:02d}{day:02d}{hour:02d}00.tar"
-    local_tar_path = os.path.join(temp_dir, file_name)
-
-    # Download the file using ftplib
-    try:
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        status_text.text("Connecting to FTP server...")
-        
-        with ftplib.FTP(FTP_HOST, timeout=30) as ftp:
-            ftp.login()  # Anonymous login
-            progress_bar.progress(20)
-            status_text.text("Connected. Navigating to directory...")
-            
-            ftp.cwd(ftp_dir)
-            progress_bar.progress(40)
-            status_text.text("Downloading file...")
-            
-            with open(local_tar_path, 'wb') as local_file:
-                ftp.retrbinary(f"RETR {file_name}", local_file.write)
-            progress_bar.progress(60)
-            status_text.text("File downloaded. Extracting...")
-
-        # Extract the IRYYMMDD.ZHH.gz file from the tar file
-        with tarfile.open(local_tar_path, 'r') as tar:
-            for member in tar.getmembers():
-                if member.name.startswith("./IR") and member.name.endswith(".gz"):
-                    member.name = os.path.basename(member.name)
-                    tar.extract(member, path=temp_dir)
-                    local_gz_path = os.path.join(temp_dir, member.name)
-                    progress_bar.progress(80)
-                    status_text.text("File extracted. Processing data...")
-                    
-                    # Process the extracted file
-                    final_image_path = process_and_plot(local_gz_path, year, month, day, hour, satellite, temp_dir)
-                    progress_bar.progress(100)
-                    status_text.text("Processing complete!")
-                    return final_image_path, satellite, None
-
-    except ftplib.all_errors as e:
-        return None, None, f"Failed to download the file: {e}"
-    except tarfile.TarError as e:
-        return None, None, f"Failed to extract the file: {e}"
-    except Exception as e:
-        return None, None, f"Unexpected error: {e}"
-
-    return None, None, "File not found in the tar archive."
-
-def process_and_plot(file, year, month, day, hour, satellite, temp_dir):
-    """Process and plot the satellite data"""
-    csv_file_path = "gms_conversions.csv"  # Ensure this file is in your repo
-    
-    # Decompress the gzipped file
-    with gzip.open(file, 'rb') as f:
-        decoded_data = f.read()
-
-    # Process the data
-    data_array = np.frombuffer(decoded_data, dtype=np.uint16)
-
-    # Find closest factors for reshaping
-    total_size = data_array.size
-    closest_factors = find_closest_factors(total_size, 2182, 3504)
-
-    # Reshape and normalize the data to 0-255 range
-    data_array = data_array.reshape(closest_factors)
-    data_array = 255 + data_array / -255
-
-    # Convert the data using the provided CSV mapping
-    data_converted = (conv(data_array, csv_file_path) - 273.15)
-
-    # Stretch the data to make it as square as possible
-    rows, cols = data_converted.shape
-    size = max(rows, cols)
-    data_square = zoom(data_converted, (size / rows, size / cols))
-
-    # Define the custom inverted colormap
-    colors = [
-        (0/140, "#330f2f"),
-        (10/140, "#9b1f94"),
-        (20/140, "#eb6fc0"),
-        (20/140, "#e1e4e5"),
-        (30/140, "#000300"),
-        (40/140, "#fd1917"),
-        (50/140, "#fbff2d"),
-        (60/140, "#00fe24"),
+# -------------------- Colormap --------------------
+def rbtop3():
+    newcmp = mcolors.LinearSegmentedColormap.from_list("", [
+        (0/140, "#000000"),
+        (60/140, "#fffdfd"),
+        (60/140, "#05fcfe"),
         (70/140, "#010071"),
-        (80/140, "#05fcfe"),
-        (80/140, "#fffdfd"),
-        (140/140, "#000000")
-    ]
-    if "rbtop3" not in plt.colormaps():
-        rbtop3 = LinearSegmentedColormap.from_list("rbtop3", colors)
-        plt.colormaps.register(name='rbtop3', cmap=rbtop3)
+        (80/140, "#00fe24"),
+        (90/140, "#fbff2d"),
+        (100/140,"#fd1917"),
+        (110/140,"#000300"),
+        (120/140,"#e1e4e5"),
+        (120/140,"#eb6fc0"),
+        (130/140,"#9b1f94"),
+        (140/140,"#330f2f")
+    ])
+    return newcmp.reversed(), 40, -100
 
-    # Plot the data using the custom inverted colormap with Cartopy
-    fig, ax = plt.subplots(figsize=(12, 8), subplot_kw={'projection': ccrs.PlateCarree()})
-    vmin = V_MIN_SETTINGS[satellite]
-    im = ax.imshow(data_square, vmin=vmin, vmax=40, cmap='rbtop3',
-                   extent=[100, 180, -60, 60], transform=ccrs.PlateCarree())
+# -------------------- FTP helpers (cache everything) --------------------
+@lru_cache(maxsize=1)
+def ftp_listdir(path: str):
+    items = []
+    with ftplib.FTP(FTP_HOST) as ftp:
+        ftp.login()  # anonymous
+        try:
+            ftp.cwd(path)
+            ftp.retrlines("NLST", callback=items.append)
+        except ftplib.all_errors:
+            return []
+    # NLST returns names only; join to path for clarity
+    return [name.split("/")[-1] for name in items]
 
-    # Remove all borders
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.spines['bottom'].set_visible(False)
-    ax.spines['left'].set_visible(False)
-    ax.set_xticks([])
-    ax.set_yticks([])
+@st.cache_data(show_spinner=False, ttl=3600)
+def list_available_years():
+    # Directories here are YYYYMM; derive unique years
+    yyyymms = [d for d in ftp_listdir(BASE_DIR) if re.fullmatch(r"\d{6}", d)]
+    years = sorted({int(d[:4]) for d in yyyymms})
+    return years
 
-    # Save the plot as a high-quality image
-    plot_path = os.path.join(temp_dir, 'satellite_data_plot.jpg')
-    plt.savefig(plot_path, format='jpg', dpi=700, bbox_inches='tight', pad_inches=0)
-    plt.close()
+@st.cache_data(show_spinner=False, ttl=3600)
+def list_months(year: int):
+    yyyymms = [d for d in ftp_listdir(BASE_DIR) if d.startswith(f"{year:04d}")]
+    months = sorted({int(d[4:6]) for d in yyyymms})
+    return months
 
-    # Open the saved image and stretch it sideways by 75%
-    img = Image.open(plot_path)
-    width, height = img.size
-    new_width = int(width * 1.75)
-    img = img.resize((new_width, height), Image.LANCZOS)
+@st.cache_data(show_spinner=False, ttl=3600)
+def list_days(year: int, month: int):
+    yyyymm = f"{year:04d}{month:02d}"
+    path = f"{BASE_DIR}/{yyyymm}/{FAMILY}"
+    files = ftp_listdir(path)
+    # pattern: YYYYMMDDHHMM.tir.01.fld.geoss.bz2
+    days = sorted({int(f[8:10]) for f in files if f.endswith(f".tir.{BAND}.fld.geoss.bz2") and re.match(r"\d{12}", f[:12])})
+    return days
 
-    # Add watermarks
-    draw = ImageDraw.Draw(img)
-    
-    # Try to use a default font if Arial Bold isn't available
-    try:
-        font = ImageFont.truetype("arial.ttf", 50)  # Smaller size for web display
-    except:
-        font = ImageFont.load_default()
-    
-    watermark_text_top = f"GMS Data for {year}-{month:02d}-{day:02d} at {hour:02d}:00 UTC"
-    watermark_text_bottom = "Plotted by Sekai Chandra @Sekai_WX"
-    draw.text((10, 10), watermark_text_top, fill="white", font=font)
-    draw.text((10, height - 70), watermark_text_bottom, fill="red", font=font)
+@st.cache_data(show_spinner=False, ttl=3600)
+def list_hours(year: int, month: int, day: int):
+    yyyymm = f"{year:04d}{month:02d}"
+    path = f"{BASE_DIR}/{yyyymm}/{FAMILY}"
+    files = ftp_listdir(path)
+    hrs = []
+    for f in files:
+        if f.endswith(f".tir.{BAND}.fld.geoss.bz2") and re.match(r"\d{12}", f[:12]):
+            if int(f[6:8]) == day:  # DD
+                # Only expose HH for which the 00-minute scan exists
+                if f[10:12] == "00":
+                    hrs.append(int(f[8:10]))
+    return sorted(set(hrs))
 
-    # Save the final image
-    final_image_path = os.path.join(temp_dir, 'final_satellite_data_plot.jpg')
-    img.save(final_image_path)
+def ftp_download(year, month, day, hour, out_dir: Path) -> Path:
+    """Download the .bz2 for YYYY MM DD HH (00 minute) and return path."""
+    yyyymm = f"{year:04d}{month:02d}"
+    ymdhm  = f"{year:04d}{month:02d}{day:02d}{hour:02d}00"
+    fname  = f"{ymdhm}.tir.{BAND}.fld.geoss.bz2"
+    src    = f"{BASE_DIR}/{yyyymm}/{FAMILY}/{fname}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    local  = out_dir / fname
+    if local.exists():
+        return local
 
-    return final_image_path
+    with ftplib.FTP(FTP_HOST) as ftp:
+        ftp.login()
+        with open(local, "wb") as f:
+            ftp.retrbinary(f"RETR {src}", f.write)
+    return local
 
-def main():
-    st.set_page_config(
-        page_title="GMS 1-4 Satellite Data Archive (1981-1995)",
-        layout="centered"
+# -------------------- LUT (download HT13 or fallback HS13) --------------------
+@st.cache_data(show_spinner=False, ttl=24*3600)
+def fetch_ht13_txt() -> np.ndarray:
+    """
+    Try to fetch thermal LUT HT13.txt (H08 then H09). If not, fallback to HS13.txt.
+    Return a full 0..4095 Kelvin LUT (float32).
+    """
+    # helper: fetch file over ftp to string
+    def _ftp_get(path):
+        data = []
+        with ftplib.FTP(FTP_HOST) as ftp:
+            ftp.login()
+            ftp.retrlines(f"RETR {path}", callback=lambda line: data.append(line))
+        return "\n".join(data)
+
+    # 1) HT13 preferred
+    for path in (f"{BASE_DIR}/support/LUT_H08/HT13.txt",
+                 f"{BASE_DIR}/support/LUT_H09/HT13.txt"):
+        try:
+            txt = _ftp_get(path)
+            vals = []
+            for line in txt.splitlines():
+                s = line.strip()
+                if not s or s.startswith("#"):
+                    continue
+                parts = [t for t in s.replace(",", " ").split() if t]
+                try:
+                    vals.append(float(parts[-1]))
+                except:
+                    pass
+            arr = np.asarray(vals, dtype=np.float32)
+            if arr.size >= 4096 and np.nanmax(arr) > np.nanmin(arr):
+                return arr[:4096]
+        except ftplib.all_errors:
+            pass
+
+    # 2) HS13 fallback (DN=<int> <K>)
+    for path in (f"{BASE_DIR}/support/LUT_H08/HS13.txt",
+                 f"{BASE_DIR}/support/LUT_H09/HS13.txt"):
+        try:
+            txt = _ftp_get(path)
+            dn_vals = {}
+            for line in txt.splitlines():
+                m = re.search(r"DN\s*=\s*(\d+)\s+([+-]?\d+(?:\.\d+)?)", line)
+                if m:
+                    dn_vals[int(m.group(1))] = float(m.group(2))
+            if dn_vals:
+                N = max(4096, max(dn_vals)+1)
+                lut = np.full(N, np.nan, dtype=np.float32)
+                for dn, v in dn_vals.items():
+                    if dn < N:
+                        lut[dn] = v
+                idx = np.arange(N, dtype=np.float32)
+                good = ~np.isnan(lut)
+                lut = np.interp(idx, idx[good], lut[good]).astype(np.float32)
+                return lut[:4096]
+        except ftplib.all_errors:
+            pass
+
+    raise RuntimeError("Could not obtain a thermal LUT (HT13/HS13) from CEReS support.")
+
+# -------------------- Data I/O --------------------
+def decompress_bz2(path_bz2: Path) -> Path:
+    raw_path = path_bz2.with_suffix("")  # drop .bz2
+    if raw_path.exists():
+        return raw_path
+    with bz2.open(path_bz2, "rb") as f_in, open(raw_path, "wb") as f_out:
+        f_out.write(f_in.read())
+    return raw_path
+
+def read_raw_to_dataset(raw_path: Path, valid_dt: datetime) -> xr.Dataset:
+    nx, ny, ddeg = GRID["nx"], GRID["ny"], GRID["ddeg"]
+    lon_w, lat_n = GRID["lon_w"], GRID["lat_n"]
+    lons = lon_w + ddeg * np.arange(nx, dtype=np.float64)
+    lats = lat_n - ddeg * np.arange(ny, dtype=np.float64)
+
+    arr = np.fromfile(raw_path, dtype=">u2")
+    if arr.size != nx*ny:
+        raise RuntimeError(f"Size mismatch: expected {nx*ny}, got {arr.size}")
+    arr = arr.reshape((ny, nx))
+    data = np.where(arr == MISSING_RAW, np.nan, arr).astype("float32")
+
+    t64 = np.datetime64(valid_dt)
+    ds = xr.Dataset(
+        {f"tir_{BAND}_counts": (("lat","lon"), data)},
+        coords={"lat": lats, "lon": lons, "time": t64},
+        attrs={"source": "CEReS Himawari-8/9 FD", "family": "TIR", "band": "13"}
     )
-    
-    st.title("GMS Satellite Data Viewer")
-    
-    # Input form in columns
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        year = st.number_input("Year", min_value=1981, max_value=1995, value=1990)
-    with col2:
-        month = st.number_input("Month", min_value=1, max_value=12, value=1)
-    with col3:
-        day = st.number_input("Day", min_value=1, max_value=31, value=1)
-    with col4:
-        # Determine satellite and valid hours based on selected date
-        current_satellite = get_satellite_for_date(year, month, day)
-        if current_satellite:
-            valid_hours = get_valid_hours_for_satellite(current_satellite)
-            hour = st.selectbox("Hour (UTC)", valid_hours, index=0)
-        else:
-            # Fallback if no satellite found
-            hour = st.selectbox("Hour (UTC)", [0, 3, 6, 9, 12, 15, 18, 21], index=0)
-    
-    # Warning message
-    st.warning("WARNING: Image WILL take 30-60 seconds to generate!")
-    
-    # Perfectly centered generate button with red styling
-    col1, col2, col3 = st.columns([2, 1, 2])
-    with col2:
-        st.markdown(
-            """
-            <style>
-            .stButton > button {
-                background-color: #ff4b4b;
-                color: white;
-                border: none;
-                width: 100%;
-            }
-            .stButton > button:hover {
-                background-color: #ff6b6b;
-                border: none;
-            }
-            </style>
-            """,
-            unsafe_allow_html=True
-        )
-        generate_clicked = st.button("Generate Image")
-    
-    if generate_clicked:
-        with st.spinner("Processing satellite data..."):
-            start_time = time.time()
-            
-            final_image_path, satellite_used, error_message = fetch_file(
-                year, month, day, hour
-            )
-            
-            processing_time = time.time() - start_time
-            
-            if error_message:
-                st.error(f"Error: {error_message}")
-            elif final_image_path:
-                st.success(f"Image generated successfully in {processing_time:.1f} seconds using {satellite_used}!")
-                
-                # Display the image
-                st.image(final_image_path, caption=f"GMS Satellite Data - {year}-{month:02d}-{day:02d} {hour:02d}:00 UTC")
-                
-                # Provide download button
-                with open(final_image_path, "rb") as file:
-                    st.download_button(
-                        label="Download Image",
-                        data=file.read(),
-                        file_name=f"GMS_{year}{month:02d}{day:02d}_{hour:02d}00_UTC.jpg",
-                        mime="image/jpeg"
-                    )
-            else:
-                st.error("Failed to generate image. Please try again.")
+    return ds
 
-if __name__ == "__main__":
-    main()
+def counts_to_celsius(ds: xr.Dataset, lut_K: np.ndarray) -> xr.Dataset:
+    counts = ds[f"tir_{BAND}_counts"].values
+    c = counts.astype(np.int64)
+    c = np.clip(c, 0, len(lut_K)-1)
+    tbb_K = lut_K[c].astype(np.float32)
+    tbb_K = np.where(np.isnan(counts), np.nan, tbb_K)
+    tbb_C = np.clip(tbb_K, 150.0, 350.0) - 273.15
+    out = ds.copy()
+    out["tbb_K"] = (("lat","lon"), tbb_K); out["tbb_K"].attrs["units"] = "K"
+    out["tbb_C"] = (("lat","lon"), tbb_C); out["tbb_C"].attrs["units"] = "degC"
+    return out
+
+# -------------------- Map helpers (IDL-safe) --------------------
+def mod360(x): return (np.asarray(x) % 360.0 + 360.0) % 360.0
+
+def shortest_arc_mid(lw, le):
+    w = mod360(lw); e = mod360(le); d = (e - w) % 360.0
+    if d <= 180.0:
+        center = (w + d/2.0) % 360.0; w_u, e_u = w, w + d
+    else:
+        d2 = 360.0 - d; center = (e + d2/2.0) % 360.0; w_u, e_u = w, w + 360.0 - d2
+    return center, w_u, e_u
+
+def build_projection_and_extent(lon_w, lon_e, lat_s, lat_n):
+    s, n = (lat_s, lat_n) if lat_s <= lat_n else (lat_n, lat_s)
+    center, w_u, e_u = shortest_arc_mid(lon_w, lon_e)
+    def to_center(lon): return ((lon - center + 180.0) % 360.0) - 180.0
+    w_c, e_c = to_center(w_u), to_center(e_u)
+    proj = ccrs.PlateCarree(central_longitude=float(center))
+    extent_crs = ccrs.PlateCarree(central_longitude=float(center))
+    return proj, extent_crs, [w_c, e_c, s, n], float(center)
+
+def to_center_frame_vec(lon_pm180, center_deg):
+    return ((lon_pm180 - center_deg + 180.0) % 360.0) - 180.0
+
+# -------------------- UI: time pickers (only valid choices) --------------------
+with st.container():
+    c1, c2, c3, c4 = st.columns(4)
+    years = list_available_years()
+    with c1:
+        year = st.selectbox("Year", years, index=len(years)-1)
+    with c2:
+        months = list_months(year)
+        month = st.selectbox("Month", months, index=0)
+    with c3:
+        days = list_days(year, month)
+        if not days:
+            st.warning("No days available in this month (TIR/01).")
+            st.stop()
+        day = st.selectbox("Day", days, index=0)
+    with c4:
+        hours = list_hours(year, month, day)
+        if not hours:
+            st.warning("No hours (HH:00) available on this day.")
+            st.stop()
+        hour = st.selectbox("Hour (UTC)", hours, index=0)
+
+# -------------------- WPAC / Custom Zoom toggle --------------------
+st.subheader("Region")
+b1, b2 = st.columns(2)
+with b1:
+    full_wpac = st.checkbox("Full WPAC basin", value=True, help="94.9°E–183.5°E, 14.6°S–56.1°N")
+with b2:
+    custom = st.checkbox("Custom 20×20° zoom", value=False, help="Center lon/lat; must lie within WPAC")
+
+lon_center = None; lat_center = None
+if custom:
+    full_wpac = False
+    c5, c6 = st.columns(2)
+    with c5:
+        lon_center = st.number_input("Center Longitude (°E, can exceed 180)", value=140.0, step=0.1, format="%.3f")
+    with c6:
+        lat_center = st.number_input("Center Latitude (°N)", value=20.0, step=0.1, format="%.3f")
+
+generate = st.button("Generate", type="primary")
+
+# -------------------- Run pipeline --------------------
+if generate:
+    # region checks
+    if full_wpac:
+        lon_w, lon_e, lat_s, lat_n = WPAC["w"], WPAC["e"], WPAC["s"], WPAC["n"]
+    else:
+        if lon_center is None or lat_center is None:
+            st.error("Enter center coordinates for custom zoom.")
+            st.stop()
+        # enforce within WPAC
+        in_wpac_lon = (mod360(lon_center) >= mod360(WPAC["w"])) and (mod360(lon_center) <= mod360(WPAC["e"]))
+        in_wpac_lat = (lat_center >= WPAC["s"]) and (lat_center <= WPAC["n"])
+        if not (in_wpac_lon and in_wpac_lat):
+            st.error("Center point is outside the WPAC basin. Choose a point within WPAC.")
+            st.stop()
+        lon_w = lon_center - 10.0; lon_e = lon_center + 10.0
+        lat_s = lat_center - 10.0; lat_n = lat_center + 10.0
+        # clip lat to globe
+        lat_s = max(-60.0, lat_s); lat_n = min(60.0, lat_n)
+
+    # download -> decompress
+    try:
+        with st.spinner("Fetching CEReS file and LUT..."):
+            bz2_path = ftp_download(year, month, day, hour, Path(tempfile.gettempdir())/ "him8_cache")
+            raw_path = decompress_bz2(bz2_path)
+            ds_counts = read_raw_to_dataset(raw_path, datetime(year, month, day, hour))
+            lut_K = fetch_ht13_txt()
+            ds = counts_to_celsius(ds_counts, lut_K)
+    except Exception as e:
+        st.error(f"Data fetch/convert failed: {e}")
+        st.stop()
+
+    # map/projection
+    proj, extent_crs, extent, center_deg = build_projection_and_extent(lon_w, lon_e, lat_s, lat_n)
+    data_crs = ccrs.PlateCarree(central_longitude=center_deg)
+
+    # build lon/lat grid for pcolormesh
+    lons = ds["lon"].values
+    lats = ds["lat"].values
+    lon_pm180 = ((lons + 180.0) % 360.0) - 180.0
+    lon_plot = to_center_frame_vec(lon_pm180, center_deg)
+
+    # Ensure increasing axes (pcolormesh requirement)
+    data = ds["tbb_C"].values
+    if lon_plot[0] > lon_plot[-1]:
+        lon_plot = lon_plot[::-1]
+        data = data[:, ::-1]
+    if lats[0] > lats[-1]:
+        lats = lats[::-1]
+        data = data[::-1, :]
+
+    # plot
+    fig = plt.figure(figsize=(13, 9))
+    ax = plt.axes(projection=proj)
+    ax.set_extent(extent, crs=extent_crs)
+
+    # black land & borders (your request)
+    ax.add_feature(cfeature.LAND, facecolor="none", edgecolor="black", linewidth=0.7)
+    ax.add_feature(cfeature.COASTLINE, edgecolor="black", linewidth=0.7)
+    ax.add_feature(cfeature.BORDERS, edgecolor="black", linewidth=0.6)
+
+    ax.gridlines(draw_labels=True, linewidth=0.4, alpha=0.5)
+
+    xx, yy = np.meshgrid(lon_plot, lats)
+    cmap, vmax, vmin = rbtop3()
+    norm = mcolors.Normalize(vmin=vmin, vmax=vmax, clip=True)
+    im = ax.pcolormesh(xx, yy, data, transform=data_crs, cmap=cmap, norm=norm, shading="auto")
+
+    when = np.datetime_as_string(ds["time"].values, unit="m")
+    region_str = "WPAC Basin" if full_wpac else f"Custom ({lon_center:.1f}E, {lat_center:.1f}N)"
+    ax.set_title(f"Himawari-8/9 B13 Brightness Temperature (°C)\n{when} UTC • {region_str}", fontsize=12)
+
+    cb = plt.colorbar(im, ax=ax, orientation="horizontal", pad=0.06, shrink=0.82)
+    cb.set_label("Brightness Temperature (°C)")
+
+    st.pyplot(fig, clear_figure=True)
+
+    # Download PNG
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=175, bbox_inches="tight")
+    buf.seek(0)
+    st.download_button(
+        "Download Image",
+        data=buf,
+        file_name=f"Himawari_B13_{year}{month:02d}{day:02d}{hour:02d}_{'WPAC' if full_wpac else 'Custom'}.png",
+        mime="image/png",
+    )
+
+    # Quick metadata
+    st.caption(
+        f"DN→K LUT source: CEReS support (HT13/HS13). "
+        f"Domain handled IDL-safe; plotting with custom rbtop3. Land/borders in black."
+    )
