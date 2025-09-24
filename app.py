@@ -1,10 +1,15 @@
+# -*- coding: utf-8 -*-
 import io
 import os
 import re
 import bz2
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+
+# use a non-interactive backend so we can save JPGs
+import matplotlib
+matplotlib.use("Agg")
 
 import numpy as np
 import xarray as xr
@@ -14,31 +19,31 @@ import streamlit as st
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 
-# ───────────────────────── Streamlit page ─────────────────────────
+# ────────────────── Streamlit page ──────────────────
 st.set_page_config(page_title="Himawari-8/9 B13 Brightness Temp", layout="wide")
 st.title("Himawari-8/9 (CEReS) • Band 13 Brightness Temperature")
 
-# ───────────────────────── Constants ─────────────────────────
+# ────────────────── Constants ──────────────────
 FTP_HOST = "ftp://hmwr829gr.cr.chiba-u.ac.jp"
 FD_VER   = "V20190123"
-FAMILY   = "TIR"   # CEReS family
-BAND     = "01"    # TIR01 ≈ AHI Band 13
+FAMILY   = "TIR"      # CEReS family
+BAND     = "01"       # TIR01 ≈ AHI Band 13
 MISSING_RAW = 65535
 
-# Himawari CEReS fixed-grid (FD V20190123)
+# Himawari CEReS full-disk fixed-grid (FD V20190123)
 FD_DOMAIN = dict(w=85.0, e=205.0, s=-60.0, n=60.0)
 
-# West Pacific basin (your earlier box)
+# West Pacific basin box you specified earlier
 WPAC = dict(w=94.9, e=183.5, s=-14.6, n=56.1)
 
 # Grid shape/spacing
 GRID_NX, GRID_NY, DDEG = 6000, 6000, 0.02
 LON_WEST, LAT_NORTH = 85.0, 60.0
 
-# Repo-local HS13.txt (put HS13.txt next to app.py)
+# Repo-local HS13.txt (place this file next to app.py in the repo)
 LUT_PATH = Path(__file__).parent / "HS13.txt"
 
-# ───────────────────────── Colormap ─────────────────────────
+# ────────────────── Colormap ──────────────────
 def rbtop3():
     newcmp = mcolors.LinearSegmentedColormap.from_list("", [
         (0/140, "#000000"),
@@ -56,10 +61,10 @@ def rbtop3():
     ])
     return newcmp.reversed(), 40, -100  # (cmap, vmax, vmin) in °C
 
-# ───────────────────────── Helpers ─────────────────────────
+# ────────────────── Helpers ──────────────────
 def build_url(year, month, day, hour):
     yyyymm = f"{year:04d}{month:02d}"
-    ymdhm  = f"{year:04d}{month:02d}{day:02d}{hour:02d}00"
+    ymdhm  = f"{year:04d}{month:02d}{day:02d}{hour:02d}00"    # HH:00 only
     fname  = f"{ymdhm}.tir.{BAND}.fld.geoss.bz2"
     path   = f"/gridded/FD/{FD_VER}/{yyyymm}/TIR/{fname}"
     return f"{FTP_HOST}{path}", fname
@@ -75,7 +80,7 @@ def decompress_bz2(bz2_path: Path) -> Path:
 def read_raw_to_dataset(raw_path: Path, valid_dt: datetime) -> xr.Dataset:
     lons = LON_WEST + DDEG * np.arange(GRID_NX, dtype=np.float64)  # W→E
     lats = LAT_NORTH - DDEG * np.arange(GRID_NY, dtype=np.float64) # N→S
-    arr = np.fromfile(raw_path, dtype=">u2")
+    arr = np.fromfile(raw_path, dtype=">u2")  # big-endian uint16
     if arr.size != GRID_NX * GRID_NY:
         raise RuntimeError(f"Size mismatch: expected {GRID_NX*GRID_NY}, got {arr.size}")
     arr = arr.reshape((GRID_NY, GRID_NX))
@@ -106,7 +111,7 @@ def read_hs13_lut_to_kelvin(path: Path, desired_len: int = 4096) -> np.ndarray:
             lut[dn] = v
     idx = np.arange(N, dtype=np.float32)
     good = ~np.isnan(lut)
-    lut = np.interp(idx, idx[good], lut[good]).astype(np.float32)  # fills gaps & edges
+    lut = np.interp(idx, idx[good], lut[good]).astype(np.float32)  # fill gaps & edges
     return lut[:desired_len]
 
 def counts_to_celsius(ds: xr.Dataset, lut_K: np.ndarray) -> xr.Dataset:
@@ -124,8 +129,7 @@ def mod360(x): return (np.asarray(x) % 360.0 + 360.0) % 360.0
 
 def inside_box(lon, lat, box):
     lon_u = mod360(lon); w = mod360(box["w"]); e = mod360(box["e"])
-    if w <= e: lon_ok = (lon_u >= w) & (lon_u <= e)
-    else:      lon_ok = (lon_u >= w) | (lon_u <= e)  # box crosses the IDL
+    lon_ok = (lon_u >= w) & (lon_u <= e) if w <= e else ((lon_u >= w) | (lon_u <= e))
     lat_ok = (lat >= box["s"]) & (lat <= box["n"])
     return bool(lon_ok and lat_ok)
 
@@ -133,20 +137,16 @@ def build_projection_and_extent(lon_w, lon_e, lat_s, lat_n):
     # center on shortest arc between lon_w/lon_e (IDL-safe)
     w = mod360(lon_w); e = mod360(lon_e); d = (e - w) % 360.0
     if d <= 180.0:
-        center = (w + d/2.0) % 360.0
-        w_u, e_u = w, w + d
+        center = (w + d/2.0) % 360.0; w_u, e_u = w, w + d
     else:
-        d2 = 360.0 - d
-        center = (e + d2/2.0) % 360.0
-        w_u, e_u = w, w + 360.0 - d2
+        d2 = 360.0 - d; center = (e + d2/2.0) % 360.0; w_u, e_u = w, w + 360.0 - d2
     def to_center(lon): return ((lon - center + 180.0) % 360.0) - 180.0
     proj = ccrs.PlateCarree(central_longitude=float(center))
     extent = [to_center(w_u), to_center(e_u), min(lat_s, lat_n), max(lat_s, lat_n)]
     return proj, ccrs.PlateCarree(central_longitude=float(center)), extent, float(center)
 
-# ───────────────────────── UI ─────────────────────────
-# time inputs (no FTP validation; just constrain plausible range)
-now = datetime.utcnow()
+# ────────────────── UI ──────────────────
+now = datetime.now(timezone.utc)  # timezone-aware; no deprecation
 c1, c2, c3, c4 = st.columns(4)
 with c1:
     year = st.number_input("Year (UTC)", min_value=2015, max_value=now.year, value=min(now.year, 2023), step=1)
@@ -173,13 +173,14 @@ if custom:
     with c6:
         lat_center = st.number_input("Center Latitude (°N)", value=20.0, step=0.1, format="%.3f")
 
-generate = st.button("Generate", type="primary")
+generate = st.button("Generate JPG", type="primary")
 
-# ───────────────────────── Run ─────────────────────────
+# ────────────────── Run ──────────────────
 if generate:
-    # domain gating (no remote checks)
+    # domain gating (purely geometric; no network checks)
     if full_wpac:
         lon_w, lon_e, lat_s, lat_n = WPAC["w"], WPAC["e"], WPAC["s"], WPAC["n"]
+        region_tag = "WPAC"
     else:
         if lon_center is None or lat_center is None:
             st.error("Enter center coordinates.")
@@ -188,12 +189,13 @@ if generate:
             st.error("Center is outside the Himawari FD domain (85–205E, 60S–60N).")
             st.stop()
         if not inside_box(lon_center, lat_center, WPAC):
-            st.error("Center is outside the WPAC basin. Choose a point within WPAC.")
+            st.error("Center is outside the WPAC basin.")
             st.stop()
         lon_w, lon_e = lon_center - 10.0, lon_center + 10.0
         lat_s, lat_n = max(FD_DOMAIN["s"], lat_center - 10.0), min(FD_DOMAIN["n"], lat_center + 10.0)
+        region_tag = f"Custom_{lon_center:.1f}E_{lat_center:.1f}N"
 
-    # Build URL and local cache path; no existence probing until download
+    # Build URL & cache path — no preflight exists checks
     url, fname = build_url(int(year), int(month), int(day), int(hour))
     cache_dir = Path(".cache_him8"); cache_dir.mkdir(exist_ok=True)
     bz2_path = cache_dir / fname
@@ -205,11 +207,12 @@ if generate:
         raw_path = decompress_bz2(bz2_path)
     except Exception as e:
         st.error(f"Download/decompress failed: {e}")
+        st.info("Tip: CEReS only has times that actually exist (10-min cadence, often ~24h delay).")
         st.stop()
 
     # Read counts
     try:
-        ds_counts = read_raw_to_dataset(raw_path, datetime(int(year), int(month), int(day), int(hour)))
+        ds_counts = read_raw_to_dataset(raw_path, datetime(int(year), int(month), int(day), int(hour), tzinfo=timezone.utc))
     except Exception as e:
         st.error(f"Read failed: {e}")
         st.stop()
@@ -219,7 +222,7 @@ if generate:
         lut_K = read_hs13_lut_to_kelvin(LUT_PATH, desired_len=4096)
         ds = counts_to_celsius(ds_counts, lut_K)
     except Exception as e:
-        st.error(f"LUT/convert failed: {e}  (Expected HS13.txt next to app.py)")
+        st.error(f"LUT/convert failed: {e}  (Expected HS13.txt next to app.py in the repo.)")
         st.stop()
 
     # Projection / extent
@@ -237,12 +240,12 @@ if generate:
     if lats[0] > lats[-1]:
         lats = lats[::-1]; data = data[::-1, :]
 
-    # Plot
-    fig = plt.figure(figsize=(13, 9))
+    # Plot (JPG quality)
+    fig = plt.figure(figsize=(13, 9), dpi=200)
     ax = plt.axes(projection=proj)
     ax.set_extent(extent, crs=extent_crs)
 
-    # black land & borders
+    # black land & borders for strong contrast
     ax.add_feature(cfeature.LAND, facecolor="none", edgecolor="black", linewidth=0.7)
     ax.add_feature(cfeature.COASTLINE, edgecolor="black", linewidth=0.7)
     ax.add_feature(cfeature.BORDERS, edgecolor="black", linewidth=0.6)
@@ -254,23 +257,24 @@ if generate:
     im = ax.pcolormesh(xx, yy, data, transform=data_crs, cmap=cmap, norm=norm, shading="auto")
 
     when = np.datetime_as_string(ds["time"].values, unit="m")
-    region_str = "WPAC Basin" if full_wpac else f"Custom ({lon_center:.1f}E, {lat_center:.1f}N)"
-    ax.set_title(f"Himawari-8/9 B13 Brightness Temperature (°C)\n{when} UTC • {region_str}", fontsize=12)
+    ax.set_title(f"Himawari-8/9 B13 Brightness Temperature (°C)\n{when} UTC • {region_tag}", fontsize=12)
 
     cb = plt.colorbar(im, ax=ax, orientation="horizontal", pad=0.06, shrink=0.82)
     cb.set_label("Brightness Temperature (°C)")
 
-    st.pyplot(fig, clear_figure=True)
-
-    # Download PNG
+    # Streamlit display + JPG download
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=175, bbox_inches="tight")
+    fig.savefig(buf, format="jpg", dpi=200, bbox_inches="tight", pil_kwargs={"quality": 90})
     buf.seek(0)
-    st.download_button(
-        "Download Image",
-        data=buf,
-        file_name=f"Himawari_B13_{int(year):04d}{int(month):02d}{int(day):02d}{int(hour):02d}_{'WPAC' if full_wpac else 'Custom'}.png",
-        mime="image/png",
-    )
 
-    st.caption("LUT: repo-bundled HS13.txt → DN→K; DN 0..4095 completed by interpolation. Land & borders in black.")
+    st.image(buf, caption=f"{when} UTC • {region_tag}", use_container_width=True)
+    st.download_button(
+        "Download JPG",
+        data=buf,
+        file_name=f"Himawari_B13_{int(year):04d}{int(month):02d}{int(day):02d}{int(hour):02d}_{region_tag}.jpg",
+        mime="image/jpeg",
+    )
+    plt.close(fig)
+
+    st.caption("Conversion: repo-bundled HS13.txt → DN→K (0..4095 filled via interpolation) → °C. "
+               "No preflight file checks; FD domain 85–205E, 60S–60N. Land & borders in black.")
